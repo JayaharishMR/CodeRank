@@ -1,0 +1,68 @@
+services:
+  # ── Postgres ───────────────────────────────────────────────────
+  # Single Postgres instance hosts TWO databases: "coderank" (app data)
+  # and "keycloak" (identity data). init-db.sh creates the keycloak DB
+  # on first start so we avoid running a second Postgres container
+  # just for Keycloak, keeping local dev simple and lightweight.
+  postgres:
+    image: postgres:16-alpine
+    container_name: coderank-postgres
+    environment:
+      POSTGRES_DB: coderank
+      POSTGRES_USER: coderank
+      POSTGRES_PASSWORD: coderank
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Postgres runs any .sh/.sql in this directory on first init
+      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+
+  # ── RabbitMQ ───────────────────────────────────────────────────
+  # Message broker that decouples the API from the code-execution
+  # workers. The management plugin (port 15672) provides a web UI
+  # for inspecting queues during development.
+  # Host ports are offset by 1 (5673, 15673) to avoid clashing with
+  # any host-level RabbitMQ that might already occupy 5672/15672.
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: coderank-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: coderank
+      RABBITMQ_DEFAULT_PASS: coderank
+    ports:
+      - "5673:5672"       # AMQP protocol
+      - "15673:15672"     # Management UI
+
+  # ── Redis ──────────────────────────────────────────────────────
+  # Used for rate-limiting counters and response caching.
+  redis:
+    image: redis:7-alpine
+    container_name: coderank-redis
+    ports:
+      - "6379:6379"
+
+  # ── Keycloak (Identity Provider) ───────────────────────────────
+  # Handles user registration, login, and JWT issuance so the app
+  # never touches raw passwords. Runs in dev mode (no HTTPS, H2
+  # bootstrap skipped) for local convenience.
+  # Mapped to host port 9090 because 8080 is already taken by the
+  # Spring Boot API.
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: coderank-keycloak
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak  # separate DB -- see init-db.sh
+      KC_DB_USERNAME: coderank
+      KC_DB_PASSWORD: coderank
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "9090:8080"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
