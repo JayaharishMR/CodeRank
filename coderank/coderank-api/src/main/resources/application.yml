@@ -1,0 +1,86 @@
+# ── HTTP server ──────────────────────────────────────────────────
+server:
+  port: 8080
+
+spring:
+  application:
+    name: coderank
+
+  # ── Primary data store (Postgres) ──────────────────────────────
+  # stringtype=unspecified lets JDBC send Java Strings without an
+  # explicit Postgres type cast, which is needed for Postgres-native
+  # ENUMs to bind correctly via Hibernate.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/coderank?stringtype=unspecified
+    username: coderank
+    password: coderank
+    driver-class-name: org.postgresql.Driver
+
+  # ── JPA / Hibernate ───────────────────────────────────────────
+  # "validate" ensures the entity model matches the schema produced
+  # by Flyway migrations -- Hibernate never alters tables itself.
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # ── Flyway (schema migrations) ─────────────────────────────────
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  # ── RabbitMQ (submission queue) ────────────────────────────────
+  # Submissions are published to a queue so the executor service can
+  # process them asynchronously, decoupling the API from execution.
+  # Port 5673 avoids colliding with a host-level RabbitMQ on 5672.
+  rabbitmq:
+    host: localhost
+    port: 5673
+    username: coderank
+    password: coderank
+
+  # ── OAuth2 / Keycloak ──────────────────────────────────────────
+  # The API acts as a resource server, validating JWTs issued by the
+  # Keycloak realm. This is how we authenticate users without
+  # managing passwords ourselves.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9090/realms/coderank
+
+  # ── Redis (rate-limiting & caching) ────────────────────────────
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+# ── CodeRank-specific configuration ─────────────────────────────
+coderank:
+  # Hard limits applied to each sandboxed Docker container to
+  # prevent runaway processes from consuming host resources.
+  execution:
+    timeout-seconds: 10
+    compile-timeout-seconds: 30
+    memory-limit-mb: 256
+    cpu-count: 1
+    max-stdout-bytes: 65536     # cap output to 64 KB to avoid memory bloat on large prints
+    pid-limit: 50               # fork-bomb protection
+    tmpfs-size-mb: 50           # in-memory filesystem for compiled class files
+  docker:
+    sandbox-image: coderank-sandbox-java
+    pool-size: 10               # pre-warmed containers kept ready to reduce cold-start latency
+  # Separate limits for guests vs authenticated users to discourage
+  # abuse while giving registered users a reasonable allowance.
+  rate-limit:
+    guest-requests-per-minute: 5
+    user-requests-per-minute: 20
+  ai:
+    enabled: ${CODERANK_AI_ENABLED:false}
+    api-key: ${AI_API_KEY:}
+    model: ${AI_MODEL:gpt-4o-mini}
+    base-url: ${AI_BASE_URL:https://api.openai.com/v1}
+    max-tokens: 1024
+    temperature: 0.7
